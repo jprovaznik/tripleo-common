@@ -1,0 +1,40 @@
+heat_template_version: 2014-10-16
+parameters:
+    servers:
+        type: json
+    packages:
+        default: ''
+        type: string
+
+resources:
+    package_update:
+        type: OS::Heat::SoftwareConfig
+        properties:
+            group: script
+            inputs:
+            - name: PACKAGES
+              default: ""
+            config: |
+                #!/bin/sh
+                echo yum -y update $PACKAGES
+                echo package update done at `date`.
+
+    deployments:
+        type: OS::Heat::SoftwareDeployments
+        properties:
+            config:
+                get_resource: package_update
+            servers: {get_param: servers}
+            input_values:
+                PACKAGES: {get_param: packages}
+
+outputs:
+    stdouts:
+        value:
+            get_attr: [deployments, deploy_stdouts]
+    stderrs:
+        value:
+            get_attr: [deployments, deploy_stderrs]
+    status_codes:
+        value:
+            get_attr: [deployments, deploy_status_codes]
