@@ -16,6 +16,8 @@
 import json
 import logging
 import time
+import yaml
+import libutils
 
 from tuskarclient.common import utils as tuskarutils
 
@@ -23,33 +25,34 @@ LOG = logging.getLogger(__name__)
 
 
 class UpdateManager:
-    def __init__(self, heatclient, tuskarclient, stack_id=None):
+    def __init__(self, heatclient, tuskarclient, stack_id, plan_id=None):
         self.tuskarclient = tuskarclient
         self.heatclient = heatclient
         self.stack = heatclient.stacks.get(stack_id)
+        self.plan = tuskarutils.find_resource(self.tuskarclient.plans, plan_id)
 
-    def start(self):
-        self.plan = tuskarutils.find_resource(self.tuskarclient.plans,
-                                              'overcloud')
-        params = self._plan_templates(self.plan)
-        #print "xxxxxxxxxx {0}".format(params['parameters'])
+    def update(self):
+        params = libutils.heat_params_from_templates(
+            self.tuskarclient.plans.templates(self.plan.uuid))
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
         params['parameters'] = {
             'Controller-1::update_timestamp': timestamp,
             'Compute-1::update_timestamp': timestamp,
         }
-        # TODO: set breakpoints
-        env = {
-            #'resource_registry': {
-            #    'resources': {
-            #        '': {
-            #            '*': {'hooks': 'pre-create'}
-            #        }
-            #    }
-            #}
-        }
+        env = yaml.load(params['environment'])
+        libutils.deep_merge(env, {
+            'resource_registry': {
+                'resources': {
+                    'Controller': {
+                        '*': {
+                            'update_deployment': {'hooks': 'pre-update'}
+                        }
+                    }
+                }
+            }
+        })
+        params['environment'] = env
         LOG.debug('updating stack: {0}', params)
-        print self.stack
         self.heatclient.stacks.update(self.stack.id, **params)
 
     def proceed(self, node=None):
@@ -139,26 +142,3 @@ class UpdateManager:
                 last_events[ev.resource_name] = ev
         return last_events
 
-    def _plan_templates(self, plan):
-        templates = self.tuskarclient.plans.templates(plan.uuid)
-        master = templates.get('plan.yaml')
-        env = templates.get('environment.yaml')
-
-        files = {}
-        for name in templates:
-            if name != 'plan.yaml' and name != 'environment.yaml':
-                # there is an issue with file path - in templates we use
-                # relative paths so get_file xxx doesn't include 'puppet/'
-                # subdir, as a workaround 'puppet/' is removed from file names
-                if name.startswith('puppet/manifests'):
-                    files[name[7:]] = templates[name]
-                    #print "{0} -> {1}".format(name, name[7:])
-                else:
-                    files[name] = templates[name]
-
-        # TODO: add breakpoints
-        return {
-            'template': master,
-            'environment': env,
-            'files': files,
-        }
