@@ -68,12 +68,12 @@ class UpdateManager:
         stack.delete
 
     def get_status(self, verbose=False):
-        stack = self.client.stacks.get(self.stack_id)
+        self.stack = self.heatclient.stacks.get(self.stack.id)
         # check if any of deployments' child resource has last
         # event indicating that it has reached a breakpoint (this
         # seems to be the only way how to check pre-create breakpoints ATM)
         resources = self._resources_by_state()
-        if stack.status == 'IN_PROGRESS':
+        if self.stack.status == 'IN_PROGRESS':
             if verbose:
                 print(resources)
             if resources['on_breakpoint']:
@@ -84,8 +84,8 @@ class UpdateManager:
             else:
                 status = 'IN_PROGRESS'
         else:
-            status = stack.status
-        LOG.debug('%s status: %s', stack.stack_name, status)
+            status = self.stack.status
+        LOG.debug('%s status: %s', self.stack.stack_name, status)
         return (status, resources)
 
     def do_interactive_update(self):
@@ -99,14 +99,13 @@ class UpdateManager:
             time.sleep(1)
         print('update finished with status {0}'.format(status))
 
-    def _clear_breakpoint(self, node_name):
-        LOG.debug('clearing breakpoint on %s' % node_name)
-        deployment_resource = self.client.resources.get(
-            self.stack_id, 'deployments')
-        self.client.resources.signal(
-            stack_id=deployment_resource.physical_resource_id,
-            resource_name=node_name,
-            data={'unset_hook': 'pre-create'})
+    def _clear_breakpoint(self, node_ref):
+        LOG.debug('clearing breakpoint on %s/%s' % node_ref)
+        import pdb;pdb.set_trace()
+        self.heatclient.resources.signal(
+            stack_id=node_ref[0],
+            resource_name=node_ref[1],
+            data={'unset_hook': 'pre-update'})
 
     def _resources_by_state(self):
         resources = {
@@ -116,29 +115,34 @@ class UpdateManager:
         }
         # FIXME: check only CRATE_* states for now
         for ev in self._last_events().items():
-            if ev[1].resource_status == 'CREATE_IN_PROGRESS':
-                if ev[1].resource_status_reason != ('Paused until the hook '
-                                                    'is cleared'):
-                    resources['in_progress'].append(ev[0])
-                else:
-                    resources['on_breakpoint'].append(ev[0])
+            if ev[1].resource_status_reason != ('UPDATE paused until Hook '
+                                                'pre-update is cleared'):
+                resources['on_breakpoint'].append(ev[0])
+            elif ev[1].resource_status == 'UPDATE_IN_PROGRESS':
+                resources['in_progress'].append(ev[0])
             else:
                 resources['completed'].append(ev[0])
         return resources
 
     def _last_events(self):
-        deployment_resource = self.client.resources.get(
-            self.stack_id, 'deployments')
         # 'deployments' resource may not exist right after update
         # stack is created
-        if not deployment_resource.physical_resource_id:
-            return {}
+        #if not deployment_resource.physical_resource_id:
+        #    return {}
         last_events = {}
-        for ev in self.client.events.list(
-                deployment_resource.physical_resource_id):
-            last_known_ev = last_events.get(ev.resource_name, None)
-            # FIXME: proper datetime comparison
-            if not last_known_ev or ev.event_time > last_known_ev.event_time:
-                last_events[ev.resource_name] = ev
+        for res in self.heatclient.resources.list(self.stack.id, nested_depth=2):
+            if not res.resource_name == 'update_deployment':
+                continue
+            ref = (self._resource_stack_id(res), 'update_deployment')
+            for ev in self.heatclient.events.list(
+                    stack_id=ref[0],
+                    resource_name=ref[1]):
+                last_ev = last_events.get(ref, None)
+                if not last_ev or ev.event_time > last_ev.event_time:
+                    last_events[ref] = ev
         return last_events
 
+    def _resource_stack_id(self, res):
+        # FIXME (jprovazn): get resource's stack id in a proper way
+        link = next(x['href'] for x in res.links if x['rel'] == 'stack')
+        return link.rsplit('/', 1)[1]
