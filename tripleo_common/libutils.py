@@ -28,13 +28,28 @@ def heat_params_from_templates(templates):
             # there is an issue with file path - in templates we use
             # relative paths so 'get_file xxx' doesn't include 'puppet/'
             # subdir, as a workaround 'puppet/' is removed from file names
-            if name.startswith('puppet/manifests'):
-                files[name[7:]] = templates[name]
-            else:
-                files[name] = templates[name]
+            #if name.startswith('puppet/manifests'):
+            #    files[name[7:]] = templates[name]
+            #else:
+            files[name] = templates[name]
 
     return {
         'template': master,
         'environment': env,
         'files': files,
     }
+
+
+def deep_merge(a, b, path=None):
+    "merges b into a"
+    if path is None:
+        path = []
+    for key in b:
+        if key in a:
+            if isinstance(a[key], dict) and isinstance(b[key], dict):
+                deep_merge(a[key], b[key], path + [str(key)])
+            else:
+                a[key] = b[key]
+        else:
+            a[key] = b[key]
+    return a
