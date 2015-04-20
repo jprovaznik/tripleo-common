@@ -30,6 +30,8 @@ def heat_params_from_templates(templates):
             # subdir, as a workaround 'puppet/' is removed from file names
             if name.startswith('puppet/manifests'):
                 files[name[7:]] = templates[name]
+            elif name == 'extraconfig/tasks/yum_update.sh':
+                files['yum_update.sh'] = templates[name]
             else:
                 files[name] = templates[name]
 
